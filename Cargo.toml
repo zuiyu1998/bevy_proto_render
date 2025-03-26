@@ -1,0 +1,15 @@
+[package]
+name = "bevy_proto_render"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = { path = "../bevy" }
+
+wgpu = { version = "24", default-features = false, features = [
+    "wgsl",
+    "dx12",
+    "metal",
+    "naga-ir",
+    "fragile-send-sync-non-atomic-wasm",
+] }
