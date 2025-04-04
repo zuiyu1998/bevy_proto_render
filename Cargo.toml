@@ -4,12 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { path = "../bevy" }
+bevy = "=0.16.0-rc.3"
 
-wgpu = { version = "24", default-features = false, features = [
-    "wgsl",
-    "dx12",
-    "metal",
-    "naga-ir",
-    "fragile-send-sync-non-atomic-wasm",
-] }
+
+wgpu = { version = "24" }
+downcast-rs = "2.0.1"
