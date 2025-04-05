@@ -1,6 +1,10 @@
+use std::ops::Range;
+
+use bevy::render::render_resource::RenderPipeline;
+
 use crate::{
     gfx_base::{CommandBufferTrait, Device, RenderPass},
-    gfx_wgpu::{WgpuRenderDevice, WgpuRenderPass, WgpuTextureView},
+    gfx_wgpu::{WgpuDevice, WgpuRenderPass, WgpuTextureView},
 };
 
 #[derive(Debug, Default)]
@@ -12,7 +16,7 @@ pub struct WgpuCommandBuffer {
 
 impl CommandBufferTrait for WgpuCommandBuffer {
     fn begin_render_pass(&mut self, device: &Device, render_pass: RenderPass) {
-        let device = device.downcast_ref::<WgpuRenderDevice>().unwrap();
+        let device = device.downcast_ref::<WgpuDevice>().unwrap();
 
         let mut render_pass = render_pass.downcast::<WgpuRenderPass>().unwrap();
 
@@ -59,21 +63,17 @@ impl CommandBufferTrait for WgpuCommandBuffer {
         self.command_buffer = Some(command_buffer);
     }
 
-    // fn set_render_pipeline(&mut self, render_pipeline: &RenderPipeline) {
-    //     let render_pipeline = render_pipeline
-    //         .downcast_ref::<WgpuRenderPipeline>()
-    //         .unwrap();
+    fn set_render_pipeline(&mut self, render_pipeline: &RenderPipeline) {
+        if let Some(render_pass) = self.render_pass.as_mut() {
+            render_pass.set_pipeline(render_pipeline);
+        }
+    }
 
-    //     if let Some(render_pass) = self.render_pass.as_mut() {
-    //         render_pass.set_pipeline(&render_pipeline.0);
-    //     }
-    // }
-
-    // fn draw(&mut self, vertices: Range<u32>, instances: Range<u32>) {
-    //     if let Some(render_pass) = self.render_pass.as_mut() {
-    //         render_pass.draw(vertices, instances);
-    //     }
-    // }
+    fn draw(&mut self, vertices: Range<u32>, instances: Range<u32>) {
+        if let Some(render_pass) = self.render_pass.as_mut() {
+            render_pass.draw(vertices, instances);
+        }
+    }
 
     // fn set_vertex_buffer(&mut self, slot: u32, buffer: &crate::gfx_base::buffer::Buffer) {
     //     let buffer = buffer.downcast_ref::<WgpuBuffer>().unwrap();

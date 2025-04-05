@@ -21,8 +21,6 @@ impl WgpuRenderPass {
 
 impl RenderPassTrait for WgpuRenderPass {
     fn do_init(&mut self, render_context: &RenderContext) {
-        println!("{:?}", render_context.resource_table.resources.len());
-
         let mut texture_views = vec![];
 
         for color_attachment in self.desc.color_attachments.iter() {

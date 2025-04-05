@@ -18,6 +18,8 @@ pub trait ErasedDeviceTrait: 'static + Sync + Send + Downcast + Debug {
     fn create_command_buffer(&self) -> CommandBuffer;
 
     fn create_render_pass(&self, desc: &RenderPassInfo) -> RenderPass;
+
+    fn submit(&self, command_buffers: Vec<CommandBuffer>);
 }
 
 impl<T: DeviceTrait> ErasedDeviceTrait for T {
@@ -27,6 +29,10 @@ impl<T: DeviceTrait> ErasedDeviceTrait for T {
 
     fn create_render_pass(&self, desc: &RenderPassInfo) -> RenderPass {
         <T as DeviceTrait>::create_render_pass(self, desc)
+    }
+
+    fn submit(&self, command_buffers: Vec<CommandBuffer>) {
+        <T as DeviceTrait>::submit(self, command_buffers)
     }
 }
 
@@ -41,5 +47,9 @@ impl Device {
 
     pub fn create_render_pass(&self, desc: &RenderPassInfo) -> RenderPass {
         self.value.create_render_pass(desc)
+    }
+
+    pub fn submit(&self, command_buffers: Vec<CommandBuffer>) {
+        self.value.submit(command_buffers);
     }
 }

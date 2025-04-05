@@ -118,6 +118,8 @@ impl DevicePass {
 
         if let Some(mut command_buffer) = render_context.take_cb() {
             command_buffer.end_render_pass();
+
+            render_context.queue_cbs.push(command_buffer);
         }
     }
 }

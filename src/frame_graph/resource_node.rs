@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 
 use super::{VirtualResource, handle::TypeHandle, pass_node::PassNode};
 
+#[derive(Debug)]
 pub struct ResourceNodeHandle<ResourceType> {
     handle: TypeHandle<ResourceNode>,
     resource_handle: TypeHandle<VirtualResource>,

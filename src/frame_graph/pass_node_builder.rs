@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::ColorAttachment;
 
 use super::{
-    DynPass, ImportToFrameGraph,
+    ImportToFrameGraph, PassData,
     graph::FrameGraph,
     pass_node::{GpuRead, GpuWrite, PassNode, ResourceNodeRef},
     resource::{FGResource, FGResourceDescriptor, TypeEquals},
@@ -37,8 +37,8 @@ impl<'a> PassNodeBuilder<'a> {
             .add_attachment(color_attachment);
     }
 
-    pub fn set_pass(&mut self, pass: DynPass) {
-        self.pass_node.as_mut().unwrap().pass = Some(pass);
+    pub fn set_pass<T: PassData>(&mut self, pass: T) {
+        self.pass_node.as_mut().unwrap().pass = Some(Box::new(pass));
     }
 
     fn build(&mut self) {

@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use bevy::ecs::resource::Resource;
+use bevy::{
+    ecs::component::Component,
+    render::render_resource::{CachedRenderPipelineId, PipelineCache},
+};
 
 use crate::Device;
 
@@ -14,36 +17,21 @@ use super::{
     transient_resource_cache::TransientResourceCache,
 };
 
-// #[derive(Default, Debug)]
-// pub struct CompiledPipelines {
-//     pub render_pipeline_ids: Vec<CachedRenderPipelineId>,
-// }
+#[derive(Default, Debug)]
+pub struct CompiledPipelines {
+    pub render_pipeline_ids: Vec<CachedRenderPipelineId>,
+}
 
-#[derive(Default, Resource)]
+#[derive(Default, Component)]
 pub struct FrameGraph {
     pass_nodes: Vec<PassNode>,
     resources: Vec<VirtualResource>,
     resource_nodes: Vec<ResourceNode>,
     device_passes: Option<Vec<DevicePass>>,
     resource_board: ResourceBoard,
-    // render_pipeline_descs: Vec<RenderPipelineDescriptor>,
-    // resource_table: Option<ResourceTable>,
-    // pipelines: Option<CompiledPipelines>,
 }
 
 impl FrameGraph {
-    // pub fn compiled_pipelines(&mut self, pipeline_cache: &mut PipelineCache) {
-    //     let render_pipeline_ids: Vec<CachedRenderPipelineId> = self
-    //         .render_pipeline_descs
-    //         .iter()
-    //         .map(|desc| pipeline_cache.queue_render_pipeline(desc.clone()))
-    //         .collect();
-
-    //     self.pipelines = Some(CompiledPipelines {
-    //         render_pipeline_ids,
-    //     });
-    // }
-
     pub fn reset(&mut self) {
         self.device_passes = None;
         self.resource_nodes = vec![];
@@ -55,14 +43,24 @@ impl FrameGraph {
         &mut self,
         device: &Arc<Device>,
         transient_resource_cache: &mut TransientResourceCache,
+        pipeline_cache: &PipelineCache,
     ) {
-        let mut render_context = RenderContext::new(device, transient_resource_cache);
+        if self.device_passes.is_none() {
+            return;
+        }
+
+        let mut render_context =
+            RenderContext::new(device, transient_resource_cache, pipeline_cache);
 
         let device_passes = self.device_passes.take().unwrap();
 
         for mut device_pass in device_passes {
             device_pass.execute(&mut render_context);
         }
+
+        render_context.device.submit(render_context.queue_cbs);
+
+        self.reset();
     }
 
     fn sort(&mut self) {
@@ -132,10 +130,9 @@ impl FrameGraph {
 
         self.compute_resource_lifetime();
 
-        // self.compiled_pipelines(pipeline_cache);
-
         self.generate_device_passes();
     }
+
 
     pub fn create<DescriptorType>(&mut self, name: &str, desc: DescriptorType) -> ResourceNodeHandle<DescriptorType::Resource>
     where

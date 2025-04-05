@@ -2,34 +2,41 @@ mod error;
 mod frame_graph;
 mod gfx_base;
 mod gfx_wgpu;
-mod render_resource;
+mod setup_pass;
+mod setup_resource;
 
-use std::{marker::PhantomData, sync::Arc};
+use std::sync::Arc;
 
 pub use error::*;
 pub use frame_graph::*;
 pub use gfx_base::*;
 pub use gfx_wgpu::*;
-pub use render_resource::*;
+pub use setup_pass::*;
+pub use setup_resource::*;
 
 use bevy::{
     app::{App, Plugin},
     ecs::{
+        entity::Entity,
+        query::{With, Without},
         resource::Resource,
         schedule::{IntoScheduleConfigs, SystemSet},
-        system::{Res, ResMut, SystemState},
-        world::World,
+        system::{Commands, Query, Res, ResMut},
     },
     render::{
-        Render, RenderApp, RenderSet, renderer::RenderDevice as BevyRenderDevice,
-        view::ExtractedWindows,
+        Render, RenderApp, RenderSet,
+        render_resource::PipelineCache,
+        renderer::{RenderDevice as BevyRenderDevice, RenderQueue},
+        view::ViewTarget,
     },
 };
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemSet)]
 pub enum FrameGraphSet {
+    ManageViews,
     SetupResource,
     SetupPass,
+    SetupPassData,
     Compile,
     Execute,
 }
@@ -39,65 +46,11 @@ pub struct ProtoRenderDevice {
     pub device: Arc<Device>,
 }
 
-#[derive(Default)]
-pub struct ImportedPassResourcePlugin<R> {
-    _marker: PhantomData<R>,
-}
-
-pub fn imported_pass_resource<R: ImportedPassResource>(
-    resource: Res<R>,
-    mut frame_graph: ResMut<FrameGraph>,
-) {
-    resource.imported(&mut frame_graph);
-}
-
-impl<R: ImportedPassResource> Plugin for ImportedPassResourcePlugin<R> {
-    fn build(&self, _app: &mut App) {}
-
-    fn finish(&self, app: &mut App) {
-        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.add_systems(
-                Render,
-                imported_pass_resource::<R>.in_set(FrameGraphSet::SetupResource),
-            );
-        }
-    }
-}
-
-#[derive(Default)]
-pub struct PassPlugin<P> {
-    _marker: PhantomData<P>,
-}
-
-pub fn pass_setup<P: Pass + Default>(world: &mut World) {
-    let mut pass_data = P::Data::default();
-    P::do_init(&mut pass_data, world);
-
-    let mut state = SystemState::<(ResMut<P>, ResMut<FrameGraph>)>::new(world);
-    let (pass, mut frame_graph) = state.get_mut(world);
-    let mut builder =
-        frame_graph.create_pass_node_builder(pass.get_insert_point(), pass.get_name());
-    pass_data.setup(&mut builder);
-    builder.set_pass(Box::new(pass_data));
-}
-
-impl<P: Pass + Default> Plugin for PassPlugin<P> {
-    fn build(&self, _app: &mut App) {}
-
-    fn finish(&self, app: &mut App) {
-        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.init_resource::<P>();
-
-            render_app.add_systems(Render, pass_setup::<P>.in_set(FrameGraphSet::SetupPass));
-        }
-    }
-}
-
 pub struct ProtoRenderPlugin;
 
 impl Plugin for ProtoRenderPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_plugins(ImportedPassResourcePlugin::<ExtractedWindows>::default());
+    fn build(&self, _app: &mut App) {
+        // app.add_plugins(ImportedPassResourcePlugin::<ExtractedWindows>::default());
     }
 
     fn finish(&self, app: &mut App) {
@@ -105,26 +58,43 @@ impl Plugin for ProtoRenderPlugin {
             render_app.configure_sets(
                 Render,
                 (
+                    FrameGraphSet::ManageViews,
                     FrameGraphSet::SetupResource,
                     FrameGraphSet::SetupPass,
+                    FrameGraphSet::SetupPassData,
                     FrameGraphSet::Compile,
                     FrameGraphSet::Execute,
                 )
                     .chain()
-                    .after(RenderSet::Prepare)
+                    .after(RenderSet::PrepareBindGroups)
                     .before(RenderSet::Render),
             );
 
             let bevy_render_device = render_app.world().resource::<BevyRenderDevice>().clone();
-            let render_device = Device::new(WgpuRenderDevice {
+            let queue = render_app.world().resource::<RenderQueue>().clone();
+            let render_device = Device::new(WgpuDevice {
                 device: bevy_render_device,
+                queue,
             });
+
+            let mut setup_resources = SetupResources::default();
+
+            setup_resources.add_node(SwapChainSetupResourceNode);
 
             render_app.insert_resource(ProtoRenderDevice {
                 device: Arc::new(render_device),
             });
-            render_app.insert_resource(FrameGraph::default());
             render_app.insert_resource(TransientResourceCache::default());
+            render_app.insert_resource(SetupPassesFrameGraph::default());
+            render_app.insert_resource(setup_resources);
+
+            render_app.add_systems(Render, init_frame_graph.in_set(FrameGraphSet::ManageViews));
+            render_app.add_systems(
+                Render,
+                setup_resource_system.in_set(FrameGraphSet::SetupResource),
+            );
+
+            render_app.add_systems(Render, setup_pass_system.in_set(FrameGraphSet::SetupPass));
 
             render_app.add_systems(Render, compile_frame_graph.in_set(FrameGraphSet::Compile));
             render_app.add_systems(Render, execute_frame_graph.in_set(FrameGraphSet::Execute));
@@ -132,18 +102,47 @@ impl Plugin for ProtoRenderPlugin {
     }
 }
 
-pub fn compile_frame_graph(mut frame_graph: ResMut<FrameGraph>) {
-    frame_graph.compile();
+pub fn compile_frame_graph(mut frame_graphs: Query<&mut FrameGraph>) {
+    for mut frame_graph in frame_graphs.iter_mut() {
+        frame_graph.compile();
+    }
+}
+
+pub fn init_frame_graph(
+    mut commands: Commands,
+    view_targets: Query<Entity, (Without<FrameGraph>, With<ViewTarget>)>,
+    mut setup_passed: ResMut<SetupPassesFrameGraph>,
+) {
+    for view_target in view_targets.iter() {
+        commands.entity(view_target).insert(FrameGraph::default());
+        setup_passed.insert(view_target, SetupPasses::default());
+    }
 }
 
 pub fn execute_frame_graph(
     render_device: Res<ProtoRenderDevice>,
-    mut frame_graph: ResMut<FrameGraph>,
+    mut frame_graphs: Query<&mut FrameGraph>,
     mut transient_resource_cache: ResMut<TransientResourceCache>,
+    pipeline_cache: Res<PipelineCache>,
+    //mut windows: ResMut<ExtractedWindows>,
 ) {
-    frame_graph.execute(&render_device.device, &mut transient_resource_cache);
+    for mut frame_graph in frame_graphs.iter_mut() {
+        frame_graph.execute(
+            &render_device.device,
+            &mut transient_resource_cache,
+            &pipeline_cache,
+        );
+    }
 
-    frame_graph.reset();
+    // for window in windows.values_mut() {
+    //     if let Some(surface_texture) = window.swap_chain_texture.take() {
+    //         // TODO(clean): winit docs recommends calling pre_present_notify before this.
+    //         // though `present()` doesn't present the frame, it schedules it to be presented
+    //         // by wgpu.
+    //         // https://docs.rs/winit/0.29.9/wasm32-unknown-unknown/winit/window/struct.Window.html#method.pre_present_notify
+    //         surface_texture.present();
+    //     }
+    // }
 }
 
 mod test {
